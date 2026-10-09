@@ -16,6 +16,7 @@
     "@wallet-standard/base": "^1.1.0",
     "@wallet-standard/features": "^1.1.0",
     "bn.js": "^5.2.2",
+    "botid": "^1.5.11",
     "next": "16.4.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

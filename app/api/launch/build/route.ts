@@ -8,6 +8,7 @@ import {
 import { OnlinePumpSdk, PUMP_SDK } from "@pump-fun/pump-sdk";
 import { z } from "zod";
 import { getConnection, parsePublicKey, publicError } from "@/lib/solana";
+import { protectRequest } from "@/lib/request-protection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +22,13 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: Request) {
+  const blocked = await protectRequest(request, {
+    bucket: "launch-build",
+    limit: 8,
+    windowMs: 10 * 60_000,
+  });
+  if (blocked) return blocked;
+
   try {
     const body = bodySchema.parse(await request.json());
     const user = parsePublicKey(body.user, "Connected wallet");

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { OnlinePumpSdk } from "@pump-fun/pump-sdk";
 import { getConnection, parsePublicKey, publicError } from "@/lib/solana";
+import { protectRequest } from "@/lib/request-protection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,9 +18,16 @@ type PumpCoin = {
 };
 
 export async function GET(
-  _request: Request,
+  request: Request,
   context: { params: Promise<{ mint: string }> },
 ) {
+  const blocked = await protectRequest(request, {
+    bucket: "coin-lookup",
+    limit: 20,
+    windowMs: 60_000,
+  });
+  if (blocked) return blocked;
+
   try {
     const { mint: rawMint } = await context.params;
     const mint = parsePublicKey(rawMint, "Coin mint");

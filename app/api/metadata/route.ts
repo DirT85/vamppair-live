@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { protectRequest } from "@/lib/request-protection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,6 +14,13 @@ function textField(form: FormData, key: string, max: number) {
 }
 
 export async function POST(request: Request) {
+  const blocked = await protectRequest(request, {
+    bucket: "metadata-upload",
+    limit: 4,
+    windowMs: 10 * 60_000,
+  });
+  if (blocked) return blocked;
+
   try {
     const form = await request.formData();
     const name = textField(form, "name", 32);

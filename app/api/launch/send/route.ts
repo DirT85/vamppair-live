@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ComputeBudgetProgram, VersionedTransaction } from "@solana/web3.js";
 import { getConnection, PUMP_PROGRAM_ID, publicError } from "@/lib/solana";
+import { protectRequest } from "@/lib/request-protection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,6 +11,13 @@ function hasSignature(bytes: Uint8Array) {
 }
 
 export async function POST(request: Request) {
+  const blocked = await protectRequest(request, {
+    bucket: "launch-send",
+    limit: 8,
+    windowMs: 10 * 60_000,
+  });
+  if (blocked) return blocked;
+
   try {
     const payload = (await request.json()) as {
       transaction?: string;

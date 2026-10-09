@@ -1,0 +1,289 @@
+"use client";
+
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { PublicKey, VersionedTransaction } from "@solana/web3.js";
+import { useVampWallet, WalletButton } from "./wallet";
+
+type Coin = {
+  mint: string;
+  name: string;
+  symbol: string;
+  description: string;
+  image: string | null;
+  metadataUri: string | null;
+  creator: string | null;
+  migrated: boolean;
+  eligible: true;
+  newDepth: number;
+};
+
+type Stage = "pick" | "compose" | "uploading" | "preflight" | "signing" | "sending" | "success";
+
+function mintFromInput(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    const url = new URL(trimmed);
+    const parts = url.pathname.split("/").filter(Boolean);
+    return parts.at(-1) || "";
+  } catch {
+    return trimmed;
+  }
+}
+
+function short(value: string) {
+  return `${value.slice(0, 5)}…${value.slice(-5)}`;
+}
+
+function symbolLabel(value: string) {
+  return value.startsWith("$") ? value : `$${value}`;
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string) {
+  const binary = atob(value);
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+async function json<T>(response: Response): Promise<T> {
+  const data = (await response.json()) as T & { error?: string };
+  if (!response.ok) throw new Error(data.error || "Request failed.");
+  return data;
+}
+
+export default function Home() {
+  const { account, signTransaction, connected } = useVampWallet();
+  const publicKey = useMemo(() => account ? new PublicKey(account.address) : null, [account]);
+  const [query, setQuery] = useState("");
+  const [coin, setCoin] = useState<Coin | null>(null);
+  const [image, setImage] = useState<File | null>(null);
+  const [description, setDescription] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [stage, setStage] = useState<Stage>("pick");
+  const [error, setError] = useState("");
+  const [result, setResult] = useState<{ mint: string; signature: string; explorerUrl: string } | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!image) {
+      setImagePreview(null);
+      return;
+    }
+    const url = URL.createObjectURL(image);
+    setImagePreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [image]);
+
+  const walletLabel = useMemo(
+    () => (publicKey ? short(publicKey.toBase58()) : "Not connected"),
+    [publicKey],
+  );
+
+  async function inspect(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    const mint = mintFromInput(query);
+    if (!mint) return setError("Paste a Pump coin URL or mint address.");
+    setStage("preflight");
+    try {
+      const loaded = await json<Coin>(await fetch(`/api/coin/${encodeURIComponent(mint)}`));
+      setCoin(loaded);
+      setDescription(`A vamp paired directly against ${loaded.name}. Original mint: ${loaded.mint}`);
+      setStage("compose");
+    } catch (problem) {
+      setStage("pick");
+      setError(problem instanceof Error ? problem.message : "Coin lookup failed.");
+    }
+  }
+
+  async function launch() {
+    if (!coin || !publicKey || !signTransaction || !image || !confirmed) return;
+    setError("");
+    setResult(null);
+
+    try {
+      setStage("uploading");
+      const form = new FormData();
+      form.set("name", coin.name);
+      form.set("symbol", coin.symbol);
+      form.set("description", description);
+      form.set("image", image);
+      const metadata = await json<{ metadataUri: string }>(
+        await fetch("/api/metadata", { method: "POST", body: form }),
+      );
+
+      setStage("preflight");
+      const built = await json<{
+        transaction: string;
+        mint: string;
+        networkFeeLamports: number;
+        simulatedUnits: number | null;
+      }>(
+        await fetch("/api/launch/build", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user: publicKey.toBase58(),
+            quoteMint: coin.mint,
+            name: coin.name,
+            symbol: coin.symbol,
+            uri: metadata.metadataUri,
+          }),
+        }),
+      );
+
+      setStage("signing");
+      const transaction = VersionedTransaction.deserialize(base64ToBytes(built.transaction));
+      const signed = await signTransaction(transaction);
+
+      setStage("sending");
+      const sent = await json<{ signature: string; explorerUrl: string }>(
+        await fetch("/api/launch/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ transaction: bytesToBase64(signed.serialize()) }),
+        }),
+      );
+
+      setResult({ mint: built.mint, ...sent });
+      setStage("success");
+    } catch (problem) {
+      setStage("compose");
+      setError(problem instanceof Error ? problem.message : "Launch failed.");
+    }
+  }
+
+  const busy = ["uploading", "preflight", "signing", "sending"].includes(stage);
+  const actionLabel = !connected
+    ? "Connect wallet above"
+    : !image
+      ? "Choose vamp artwork"
+      : !confirmed
+        ? "Confirm mainnet launch"
+        : stage === "uploading"
+          ? "Pinning metadata…"
+          : stage === "preflight"
+            ? "Running on-chain preflight…"
+            : stage === "signing"
+              ? "Approve in wallet…"
+              : stage === "sending"
+                ? "Confirming on Solana…"
+                : "Launch vamp on mainnet";
+
+  return (
+    <>
+      <div className="bloodbar" />
+      <header className="topnav">
+        <button className="brand" type="button" onClick={() => { setCoin(null); setStage("pick"); setError(""); }}>
+          <span className="crest">V</span>
+          <span>Vamp<span>Pair</span></span>
+        </button>
+        <span className="network"><i /> Solana mainnet</span>
+        <WalletButton />
+      </header>
+
+      <main>
+        {!coin ? (
+          <section className="picker">
+            <div className="moon" aria-hidden="true">☾</div>
+            <p className="kicker">The bloodline launcher</p>
+            <h1>Choose the <em>original.</em></h1>
+            <p className="lede">Paste any Pump coin. VampPair checks the real on-chain curve, rejects vamps of vamps, and prepares a wallet-signed mainnet launch.</p>
+            <form className="search" onSubmit={inspect}>
+              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Pump URL or mint address" aria-label="Pump coin URL or mint address" />
+              <button disabled={stage === "preflight"}>{stage === "preflight" ? "Reading chain…" : "Check bloodline"}</button>
+            </form>
+            {error && <p className="error" role="alert">{error}</p>}
+            <div className="rules">
+              <span><b>01</b> On-chain eligibility</span>
+              <span><b>02</b> User wallet signature</span>
+              <span><b>03</b> No bundled wallets</span>
+            </div>
+          </section>
+        ) : (
+          <section className="workspace">
+            <button className="back" type="button" onClick={() => { setCoin(null); setStage("pick"); setError(""); }}>Choose another original</button>
+            <div className="workspaceTitle">
+              <div><p className="kicker">Eligible bloodline · mainnet verified</p><h1>Prepare the <em>bite.</em></h1></div>
+              <div className="walletState"><span>Signing wallet</span><b>{walletLabel}</b></div>
+            </div>
+
+            <div className="pairGrid">
+              <article className="coinPanel original">
+                <span className="panelTag">Original · pair asset</span>
+                <div className="identity">
+                  {coin.image ? <img src={coin.image} alt="" /> : <div className="fallback">{coin.symbol.slice(0, 2)}</div>}
+                  <div><h2>{coin.name}</h2><p>{symbolLabel(coin.symbol)}</p></div>
+                </div>
+                <code>{coin.mint}</code>
+                <dl>
+                  <div><dt>Eligibility</dt><dd>Verified on-chain</dd></div>
+                  <div><dt>Curve</dt><dd>{coin.migrated ? "Migrated to PumpSwap" : "Active bonding curve"}</dd></div>
+                  <div><dt>New curve depth</dt><dd>{coin.newDepth}</dd></div>
+                </dl>
+              </article>
+
+              <div className="fang" aria-hidden="true"><span>BITES</span></div>
+
+              <article className="coinPanel vamp">
+                <span className="panelTag">New vamp · same identity</span>
+                <div className="identity">
+                  <div className="vampArt">{imagePreview ? <img src={imagePreview} alt="Vamp artwork preview" /> : <span>+</span>}</div>
+                  <div><h2>{coin.name}</h2><p>{symbolLabel(coin.symbol)}</p></div>
+                </div>
+                <label className="upload">
+                  <span>Vamp artwork <small>PNG, JPG, GIF or WEBP · 5 MB max</small></span>
+                  <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => setImage(event.target.files?.[0] || null)} />
+                </label>
+                <label className="field">
+                  <span>Description</span>
+                  <textarea value={description} maxLength={500} onChange={(event) => setDescription(event.target.value)} />
+                </label>
+              </article>
+            </div>
+
+            <section className="launchBox">
+              <div className="launchFacts">
+                <div><span>Network</span><strong>Mainnet-beta</strong></div>
+                <div><span>Initial buy</span><strong>None</strong></div>
+                <div><span>Quote asset</span><strong>{symbolLabel(coin.symbol)}</strong></div>
+                <div><span>Authority</span><strong>Your wallet only</strong></div>
+              </div>
+              <label className="confirm">
+                <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+                <span>I understand this creates a real, irreversible Pump coin and spends SOL from my connected wallet after I approve the transaction.</span>
+              </label>
+              {error && <p className="error" role="alert">{error}</p>}
+              <button className="launch" type="button" disabled={!connected || !image || !confirmed || busy} onClick={launch}>{actionLabel}</button>
+              <p className="fineprint">VampPair never receives your private key. Your wallet displays and signs the final transaction. No automatic initial purchase is included.</p>
+            </section>
+          </section>
+        )}
+
+        {stage === "success" && result && (
+          <div className="success" role="dialog" aria-modal="true" aria-labelledby="success-title">
+            <div className="successCard">
+              <span className="successMark">V</span>
+              <p className="kicker">The bite landed</p>
+              <h2 id="success-title">Vamp launched.</h2>
+              <p>The new mint is live on Solana and paired against {coin?.name}.</p>
+              <code>{result.mint}</code>
+              <div className="successActions">
+                <a href={result.explorerUrl} target="_blank" rel="noreferrer">View transaction</a>
+                <a href={`https://pump.fun/coin/${result.mint}`} target="_blank" rel="noreferrer">Open on Pump</a>
+              </div>
+              <button type="button" onClick={() => setStage("compose")}>Close</button>
+            </div>
+          </div>
+        )}
+      </main>
+    </>
+  );
+}

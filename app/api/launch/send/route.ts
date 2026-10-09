@@ -9,7 +9,7 @@ import {
 } from "@solana/web3.js";
 import { coreInstructionDigest, verifyLaunchTicket } from "@/lib/launch-ticket";
 import { getConnection, publicError } from "@/lib/solana";
-import { protectRequest } from "@/lib/request-protection";
+import { protectRateLimitedRequest } from "@/lib/request-protection";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -47,7 +47,7 @@ function validateComputeBudget(instructions: TransactionInstruction[]) {
 }
 
 export async function POST(request: Request) {
-  const blocked = await protectRequest(request, {
+  const blocked = protectRateLimitedRequest(request, {
     bucket: "launch-send",
     limit: 8,
     windowMs: 10 * 60_000,

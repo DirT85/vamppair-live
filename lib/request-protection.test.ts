@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { checkBotId } from "botid/server";
-import { protectRequest } from "./request-protection";
+import { protectRateLimitedRequest, protectRequest } from "./request-protection";
 
 vi.mock("botid/server", () => ({
   checkBotId: vi.fn(),
@@ -63,5 +63,13 @@ describe("protectRequest", () => {
     });
 
     expect(response?.status).toBe(503);
+  });
+
+  it("can rate-limit a cryptographically authorized endpoint without BotID", () => {
+    const options = { bucket: "signed-route-test", limit: 1, windowMs: 60_000 };
+
+    expect(protectRateLimitedRequest(request("203.0.113.4"), options)).toBeNull();
+    expect(protectRateLimitedRequest(request("203.0.113.4"), options)?.status).toBe(429);
+    expect(mockedCheckBotId).not.toHaveBeenCalled();
   });
 });

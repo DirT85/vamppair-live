@@ -73,6 +73,10 @@ function enforceRateLimit(request: Request, options: RateLimitOptions) {
   return null;
 }
 
+export function protectRateLimitedRequest(request: Request, options: RateLimitOptions) {
+  return enforceRateLimit(request, options);
+}
+
 export async function protectRequest(request: Request, options: RateLimitOptions) {
   try {
     const verification = await checkBotId({
@@ -92,5 +96,5 @@ export async function protectRequest(request: Request, options: RateLimitOptions
     );
   }
 
-  return enforceRateLimit(request, options);
+  return protectRateLimitedRequest(request, options);
 }

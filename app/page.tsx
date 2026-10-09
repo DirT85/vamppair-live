@@ -247,7 +247,7 @@ export default function Home() {
               <div className="fang" aria-hidden="true"><span>BITES</span></div>
 
               <article className="coinPanel vamp">
-                <span className="panelTag">New vamp · same identity</span>
+                <span className="panelTag">New vamp · {identityMode === "copy" ? "copied identity" : "custom identity"}</span>
                 <div className="identity">
                   <div className="vampArt">{imagePreview ? <img src={imagePreview} alt="Vamp artwork preview" /> : <span>+</span>}</div>
                   <div><h2>{launchName || "Name your vamp"}</h2><p>{launchSymbol ? symbolLabel(launchSymbol) : "$TICKER"}</p></div>

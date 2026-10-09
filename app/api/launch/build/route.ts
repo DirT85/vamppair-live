@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  Keypair,
   ComputeBudgetProgram,
   TransactionMessage,
   VersionedTransaction,
@@ -16,6 +15,7 @@ export const dynamic = "force-dynamic";
 const bodySchema = z.object({
   user: z.string().min(32).max(64),
   quoteMint: z.string().min(32).max(64),
+  mint: z.string().min(32).max(64),
   name: z.string().trim().min(1).max(32),
   symbol: z.string().trim().min(1).max(13),
   uri: z.string().url().max(200),
@@ -33,6 +33,7 @@ export async function POST(request: Request) {
     const body = bodySchema.parse(await request.json());
     const user = parsePublicKey(body.user, "Connected wallet");
     const quoteMint = parsePublicKey(body.quoteMint, "Pair mint");
+    const mint = parsePublicKey(body.mint, "New mint");
     const connection = getConnection();
     const onlinePump = new OnlinePumpSdk(connection);
     const [resolved, pumpCoin] = await Promise.all([
@@ -49,9 +50,8 @@ export async function POST(request: Request) {
       throw new Error("The connected wallet needs at least 0.02 SOL before launch.");
     }
 
-    const mint = Keypair.generate();
     const createInstruction = await PUMP_SDK.createV2Instruction({
-      mint: mint.publicKey,
+      mint,
       name: body.name,
       symbol: body.symbol.toUpperCase(),
       uri: body.uri,
@@ -80,7 +80,6 @@ export async function POST(request: Request) {
 
     const fee = await connection.getFeeForMessage(message, "confirmed");
     const transaction = new VersionedTransaction(message);
-    transaction.sign([mint]);
 
     const simulation = await connection.simulateTransaction(transaction, {
       sigVerify: false,
@@ -94,7 +93,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       transaction: Buffer.from(transaction.serialize()).toString("base64"),
-      mint: mint.publicKey.toBase58(),
+      mint: mint.toBase58(),
       quoteMint: quoteMint.toBase58(),
       blockhash: latest.blockhash,
       lastValidBlockHeight: latest.lastValidBlockHeight,

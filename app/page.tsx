@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { PublicKey, VersionedTransaction } from "@solana/web3.js";
+import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { useVampWallet, WalletButton } from "./wallet";
 import { MyVamps } from "./my-vamps";
 import { rememberLaunch } from "@/lib/launch-history";
@@ -133,6 +133,7 @@ export default function Home() {
     setResult(null);
 
     try {
+      const mintKeypair = Keypair.generate();
       setStage("uploading");
       const form = new FormData();
       form.set("name", launchName);
@@ -158,6 +159,7 @@ export default function Home() {
           body: JSON.stringify({
             user: publicKey.toBase58(),
             quoteMint: coin.mint,
+            mint: mintKeypair.publicKey.toBase58(),
             name: launchName,
             symbol: launchSymbol,
             uri: metadata.metadataUri,
@@ -168,6 +170,7 @@ export default function Home() {
       setStage("signing");
       const transaction = VersionedTransaction.deserialize(base64ToBytes(built.transaction));
       const signed = await signTransaction(transaction);
+      signed.sign([mintKeypair]);
 
       setStage("sending");
       const sent = await json<{

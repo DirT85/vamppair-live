@@ -20,6 +20,11 @@ initBotId({
       advancedOptions: basicProtection,
     },
     {
+      path: "/api/launch/buy/build",
+      method: "POST",
+      advancedOptions: basicProtection,
+    },
+    {
       path: "/api/launch/send",
       method: "POST",
       advancedOptions: basicProtection,

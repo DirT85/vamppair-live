@@ -3,6 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { useVampWallet, WalletButton } from "./wallet";
+import { MyVamps } from "./my-vamps";
+import { rememberLaunch } from "@/lib/launch-history";
 
 type Coin = {
   mint: string;
@@ -20,6 +22,7 @@ type Coin = {
 type Stage = "pick" | "compose" | "uploading" | "preflight" | "signing" | "sending" | "success";
 type IdentityMode = "custom" | "copy";
 type LaunchStatus = "confirmed" | "expired" | "pending";
+type View = "launcher" | "portfolio";
 
 function mintFromInput(value: string) {
   const trimmed = value.trim();
@@ -61,8 +64,10 @@ async function json<T>(response: Response): Promise<T> {
 }
 
 export default function Home() {
-  const { account, signTransaction, connected } = useVampWallet();
+  const { account, signTransaction, connected, openPicker } = useVampWallet();
   const publicKey = useMemo(() => account ? new PublicKey(account.address) : null, [account]);
+  const [view, setView] = useState<View>("launcher");
+  const [launchRevision, setLaunchRevision] = useState(0);
   const [query, setQuery] = useState("");
   const [coin, setCoin] = useState<Coin | null>(null);
   const [identityMode, setIdentityMode] = useState<IdentityMode>("custom");
@@ -182,6 +187,21 @@ export default function Home() {
         }),
       );
 
+      if (sent.status !== "expired") {
+        rememberLaunch({
+          wallet: publicKey.toBase58(),
+          mint: built.mint,
+          signature: sent.signature,
+          quoteMint: coin.mint,
+          name: launchName,
+          symbol: launchSymbol,
+          quoteName: coin.name,
+          quoteSymbol: coin.symbol,
+          createdAt: Date.now(),
+        });
+        setLaunchRevision((value) => value + 1);
+      }
+
       setResult({ mint: built.mint, ...sent });
       setStage("success");
     } catch (problem) {
@@ -213,16 +233,27 @@ export default function Home() {
     <>
       <div className="bloodbar" />
       <header className="topnav">
-        <button className="brand" type="button" onClick={() => { setCoin(null); setStage("pick"); setError(""); }}>
+        <button className="brand" type="button" onClick={() => { setView("launcher"); setCoin(null); setStage("pick"); setError(""); }}>
           <span className="crest">V</span>
           <span>Vamp<span>Pair</span></span>
         </button>
         <span className="network"><i /> Solana mainnet</span>
-        <WalletButton />
+        <div className="navActions">
+          <button className="navTab" type="button" onClick={() => setView(view === "portfolio" ? "launcher" : "portfolio")}>
+            {view === "portfolio" ? "Launch" : "My Vamps"}
+          </button>
+          <WalletButton />
+        </div>
       </header>
 
       <main>
-        {!coin ? (
+        {view === "portfolio" ? (
+          <MyVamps
+            wallet={publicKey?.toBase58() || null}
+            launchRevision={launchRevision}
+            onConnect={openPicker}
+          />
+        ) : !coin ? (
           <section className="picker">
             <div className="moon" aria-hidden="true">☾</div>
             <p className="kicker">The bloodline launcher</p>
@@ -320,7 +351,7 @@ export default function Home() {
           </section>
         )}
 
-        {stage === "success" && result && (
+        {view === "launcher" && stage === "success" && result && (
           <div className="success" role="dialog" aria-modal="true" aria-labelledby="success-title">
             <div className="successCard">
               <span className="successMark">V</span>
@@ -340,8 +371,11 @@ export default function Home() {
                 <a href={result.explorerUrl} target="_blank" rel="noreferrer">View transaction</a>
                 {result.status === "confirmed" && <a href={`https://pump.fun/coin/${result.mint}`} target="_blank" rel="noreferrer">Open on Pump</a>}
               </div>
-              <button type="button" onClick={() => setStage("compose")}>
-                {result.status === "expired" ? "Build a fresh transaction" : result.status === "pending" ? "I’ll verify before retrying" : "Close"}
+              <button type="button" onClick={() => {
+                if (result.status !== "expired") setView("portfolio");
+                setStage("compose");
+              }}>
+                {result.status === "expired" ? "Build a fresh transaction" : "View My Vamps"}
               </button>
             </div>
           </div>

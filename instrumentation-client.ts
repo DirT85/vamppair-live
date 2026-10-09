@@ -24,5 +24,10 @@ initBotId({
       method: "POST",
       advancedOptions: basicProtection,
     },
+    {
+      path: "/api/portfolio",
+      method: "POST",
+      advancedOptions: basicProtection,
+    },
   ],
 });

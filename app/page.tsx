@@ -5,6 +5,12 @@ import { Keypair, PublicKey, VersionedTransaction } from "@solana/web3.js";
 import { useVampWallet, WalletButton } from "./wallet";
 import { MyVamps } from "./my-vamps";
 import { rememberLaunch } from "@/lib/launch-history";
+import {
+  clearLaunchDraft,
+  readLaunchDraft,
+  saveLaunchDraftImage,
+  saveLaunchDraftText,
+} from "@/lib/launch-draft";
 
 type Coin = {
   mint: string;
@@ -119,6 +125,51 @@ export default function Home() {
     buyExplorerUrl?: string;
   } | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [draftReady, setDraftReady] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void readLaunchDraft<Coin>().then(({ text, image: savedImage }) => {
+      if (!active) return;
+      if (text) {
+        setQuery(text.query);
+        setCoin(text.coin);
+        setIdentityMode(text.identityMode);
+        setNewName(text.newName);
+        setNewSymbol(text.newSymbol);
+        setDescription(text.description);
+        setInitialBuy(text.initialBuy);
+        setConfirmed(text.confirmed);
+        if (text.coin) setStage("compose");
+      }
+      if (savedImage) setImage(savedImage);
+      setDraftReady(true);
+    });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    const timeout = window.setTimeout(() => {
+      saveLaunchDraftText<Coin>({
+        version: 1,
+        query,
+        coin,
+        identityMode,
+        newName,
+        newSymbol,
+        description,
+        initialBuy,
+        confirmed,
+      });
+    }, 250);
+    return () => window.clearTimeout(timeout);
+  }, [draftReady, query, coin, identityMode, newName, newSymbol, description, initialBuy, confirmed]);
+
+  useEffect(() => {
+    if (!draftReady) return;
+    void saveLaunchDraftImage(image);
+  }, [draftReady, image]);
 
   useEffect(() => {
     if (!image) {
@@ -144,6 +195,23 @@ export default function Home() {
     (initialBuyValue.split(".")[1]?.length || 0) <= coin.quoteDecimals
   );
   const hasInitialBuy = initialBuyReady && Number(initialBuyValue) > 0;
+
+  async function startOver() {
+    await clearLaunchDraft();
+    setQuery("");
+    setCoin(null);
+    setIdentityMode("custom");
+    setNewName("");
+    setNewSymbol("");
+    setImage(null);
+    setDescription("");
+    setInitialBuy("0");
+    setConfirmed(false);
+    setResult(null);
+    setError("");
+    setStage("pick");
+    setView("launcher");
+  }
 
   async function inspect(event: FormEvent) {
     event.preventDefault();
@@ -286,6 +354,10 @@ export default function Home() {
         setLaunchRevision((value) => value + 1);
       }
 
+      if (sent.status === "confirmed") {
+        await clearLaunchDraft();
+      }
+
       setResult({ mint: built.mint, ...sent, message: launchMessage, buyExplorerUrl });
       setStage("success");
     } catch (problem) {
@@ -325,7 +397,7 @@ export default function Home() {
     <>
       <div className="bloodbar" />
       <header className="topnav">
-        <button className="brand" type="button" onClick={() => { setView("launcher"); setCoin(null); setStage("pick"); setError(""); }}>
+        <button className="brand" type="button" onClick={() => { setView("launcher"); setError(""); }}>
           <span className="crest">V</span>
           <span>Vamp<span>Pair</span></span>
         </button>
@@ -364,7 +436,7 @@ export default function Home() {
           </section>
         ) : (
           <section className="workspace">
-            <button className="back" type="button" onClick={() => { setCoin(null); setStage("pick"); setError(""); }}>Choose another original</button>
+            <button className="back" type="button" onClick={() => { void startOver(); }}>Choose another original</button>
             <div className="workspaceTitle">
               <div><p className="kicker">Eligible bloodline · mainnet verified</p><h1>Prepare the <em>bite.</em></h1></div>
               <div className="walletState"><span>Signing wallet</span><b>{walletLabel}</b></div>
@@ -453,7 +525,7 @@ export default function Home() {
               </label>
               {error && <p className="error" role="alert">{error}</p>}
               <button className="launch" type="button" disabled={!identityReady || !initialBuyReady || !connected || !image || !confirmed || busy} onClick={launch}>{actionLabel}</button>
-              <p className="fineprint">VampPair never receives your private key. Your wallet approves the creation first, then a second transaction if you choose an initial buy.</p>
+              <p className="fineprint">VampPair never receives your private key. Your wallet approves the creation first, then a second transaction if you choose an initial buy. Your launch draft and artwork save automatically on this device.</p>
             </section>
           </section>
         )}

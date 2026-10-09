@@ -18,6 +18,7 @@ type Coin = {
 };
 
 type Stage = "pick" | "compose" | "uploading" | "preflight" | "signing" | "sending" | "success";
+type IdentityMode = "custom" | "copy";
 
 function mintFromInput(value: string) {
   const trimmed = value.trim();
@@ -63,6 +64,9 @@ export default function Home() {
   const publicKey = useMemo(() => account ? new PublicKey(account.address) : null, [account]);
   const [query, setQuery] = useState("");
   const [coin, setCoin] = useState<Coin | null>(null);
+  const [identityMode, setIdentityMode] = useState<IdentityMode>("custom");
+  const [newName, setNewName] = useState("");
+  const [newSymbol, setNewSymbol] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const [description, setDescription] = useState("");
   const [confirmed, setConfirmed] = useState(false);
@@ -85,6 +89,9 @@ export default function Home() {
     () => (publicKey ? short(publicKey.toBase58()) : "Not connected"),
     [publicKey],
   );
+  const launchName = identityMode === "copy" ? coin?.name || "" : newName.trim();
+  const launchSymbol = identityMode === "copy" ? coin?.symbol || "" : newSymbol.trim().toUpperCase();
+  const identityReady = Boolean(launchName && launchSymbol);
 
   async function inspect(event: FormEvent) {
     event.preventDefault();
@@ -95,6 +102,11 @@ export default function Home() {
     try {
       const loaded = await json<Coin>(await fetch(`/api/coin/${encodeURIComponent(mint)}`));
       setCoin(loaded);
+      setIdentityMode("custom");
+      setNewName("");
+      setNewSymbol("");
+      setImage(null);
+      setConfirmed(false);
       setDescription(`A vamp paired directly against ${loaded.name}. Original mint: ${loaded.mint}`);
       setStage("compose");
     } catch (problem) {
@@ -104,15 +116,15 @@ export default function Home() {
   }
 
   async function launch() {
-    if (!coin || !publicKey || !signTransaction || !image || !confirmed) return;
+    if (!coin || !publicKey || !signTransaction || !image || !confirmed || !identityReady) return;
     setError("");
     setResult(null);
 
     try {
       setStage("uploading");
       const form = new FormData();
-      form.set("name", coin.name);
-      form.set("symbol", coin.symbol);
+      form.set("name", launchName);
+      form.set("symbol", launchSymbol);
       form.set("description", description);
       form.set("image", image);
       const metadata = await json<{ metadataUri: string }>(
@@ -132,8 +144,8 @@ export default function Home() {
           body: JSON.stringify({
             user: publicKey.toBase58(),
             quoteMint: coin.mint,
-            name: coin.name,
-            symbol: coin.symbol,
+            name: launchName,
+            symbol: launchSymbol,
             uri: metadata.metadataUri,
           }),
         }),
@@ -161,8 +173,10 @@ export default function Home() {
   }
 
   const busy = ["uploading", "preflight", "signing", "sending"].includes(stage);
-  const actionLabel = !connected
-    ? "Connect wallet above"
+  const actionLabel = !identityReady
+    ? "Enter vamp name & ticker"
+    : !connected
+      ? "Connect wallet above"
     : !image
       ? "Choose vamp artwork"
       : !confirmed
@@ -236,8 +250,28 @@ export default function Home() {
                 <span className="panelTag">New vamp · same identity</span>
                 <div className="identity">
                   <div className="vampArt">{imagePreview ? <img src={imagePreview} alt="Vamp artwork preview" /> : <span>+</span>}</div>
-                  <div><h2>{coin.name}</h2><p>{symbolLabel(coin.symbol)}</p></div>
+                  <div><h2>{launchName || "Name your vamp"}</h2><p>{launchSymbol ? symbolLabel(launchSymbol) : "$TICKER"}</p></div>
                 </div>
+                <div className="identityChoice" aria-label="Vamp coin identity">
+                  <button type="button" className={identityMode === "custom" ? "active" : ""} aria-pressed={identityMode === "custom"} onClick={() => setIdentityMode("custom")}>
+                    <b>Custom identity</b><span>Choose a new name and ticker</span>
+                  </button>
+                  <button type="button" className={identityMode === "copy" ? "active" : ""} aria-pressed={identityMode === "copy"} onClick={() => setIdentityMode("copy")}>
+                    <b>Copy original</b><span>Reuse {coin.name} · {symbolLabel(coin.symbol)}</span>
+                  </button>
+                </div>
+                {identityMode === "custom" && (
+                  <div className="identityFields">
+                    <label className="field">
+                      <span>New coin name</span>
+                      <input value={newName} maxLength={32} placeholder="e.g. Count Dripula" autoComplete="off" onChange={(event) => setNewName(event.target.value)} />
+                    </label>
+                    <label className="field">
+                      <span>New ticker</span>
+                      <input value={newSymbol} maxLength={13} placeholder="DRIP" autoCapitalize="characters" autoComplete="off" onChange={(event) => setNewSymbol(event.target.value.toUpperCase().replace(/\s/g, ""))} />
+                    </label>
+                  </div>
+                )}
                 <label className="upload">
                   <span>Vamp artwork <small>PNG, JPG, GIF or WEBP · 5 MB max</small></span>
                   <input type="file" accept="image/png,image/jpeg,image/gif,image/webp" onChange={(event) => setImage(event.target.files?.[0] || null)} />
@@ -253,6 +287,7 @@ export default function Home() {
               <div className="launchFacts">
                 <div><span>Network</span><strong>Mainnet-beta</strong></div>
                 <div><span>Initial buy</span><strong>None</strong></div>
+                <div><span>New coin</span><strong>{launchName || "Not named yet"}</strong></div>
                 <div><span>Quote asset</span><strong>{symbolLabel(coin.symbol)}</strong></div>
                 <div><span>Authority</span><strong>Your wallet only</strong></div>
               </div>
@@ -261,7 +296,7 @@ export default function Home() {
                 <span>I understand this creates a real, irreversible Pump coin and spends SOL from my connected wallet after I approve the transaction.</span>
               </label>
               {error && <p className="error" role="alert">{error}</p>}
-              <button className="launch" type="button" disabled={!connected || !image || !confirmed || busy} onClick={launch}>{actionLabel}</button>
+              <button className="launch" type="button" disabled={!identityReady || !connected || !image || !confirmed || busy} onClick={launch}>{actionLabel}</button>
               <p className="fineprint">VampPair never receives your private key. Your wallet displays and signs the final transaction. No automatic initial purchase is included.</p>
             </section>
           </section>

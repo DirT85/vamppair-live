@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { VersionedTransaction } from "@solana/web3.js";
-import { verifyLaunchTicket } from "@/lib/launch-ticket";
+import { ComputeBudgetProgram, MessageV0, VersionedTransaction } from "@solana/web3.js";
+import { semanticMessageDigest, verifyLaunchTicket } from "@/lib/launch-ticket";
 import { getConnection, publicError } from "@/lib/solana";
 import { protectRequest } from "@/lib/request-protection";
 
@@ -9,6 +9,34 @@ export const dynamic = "force-dynamic";
 
 function hasSignature(bytes: Uint8Array) {
   return bytes.some((byte) => byte !== 0);
+}
+
+function validateComputeBudget(transaction: VersionedTransaction) {
+  const keys = transaction.message.staticAccountKeys;
+  const computeProgram = ComputeBudgetProgram.programId.toBase58();
+  const computeInstructions = transaction.message.compiledInstructions.filter(
+    (instruction) => keys[instruction.programIdIndex]?.toBase58() === computeProgram,
+  );
+  if (computeInstructions.length > 4) {
+    throw new Error("The wallet added too many compute-budget instructions.");
+  }
+
+  for (const instruction of computeInstructions) {
+    const data = Buffer.from(instruction.data);
+    if (data[0] === 2 && data.length === 5) {
+      if (data.readUInt32LE(1) > 1_400_000) {
+        throw new Error("The wallet requested an unsafe compute-unit limit.");
+      }
+      continue;
+    }
+    if (data[0] === 3 && data.length === 9) {
+      if (data.readBigUInt64LE(1) > 5_000_000n) {
+        throw new Error("The wallet requested an unsafe priority fee.");
+      }
+      continue;
+    }
+    throw new Error("The wallet added an unsupported compute-budget instruction.");
+  }
 }
 
 export async function POST(request: Request) {
@@ -36,27 +64,46 @@ export async function POST(request: Request) {
     ) {
       throw new Error("The launch transaction is missing its confirmation window.");
     }
-    if (!payload.ticket || payload.ticket.length > 100) {
+    if (!payload.ticket || payload.ticket.length > 2_000) {
       throw new Error("The launch transaction is missing its secure launch ticket.");
     }
 
     const raw = Buffer.from(payload.transaction, "base64");
     const transaction = VersionedTransaction.deserialize(raw);
-    if (transaction.message.recentBlockhash !== payload.blockhash) {
+    if (!(transaction.message instanceof MessageV0)) {
+      throw new Error("VampPair launches require a versioned Solana transaction.");
+    }
+    const claims = verifyLaunchTicket(payload.ticket);
+    if (!claims) {
+      throw new Error("The secure launch ticket is invalid or expired.");
+    }
+    if (
+      claims.blockhash !== payload.blockhash ||
+      claims.lastValidBlockHeight !== payload.lastValidBlockHeight ||
+      transaction.message.recentBlockhash !== claims.blockhash
+    ) {
       throw new Error("The launch confirmation window does not match the transaction.");
     }
     if (!transaction.signatures.every(hasSignature)) {
       throw new Error("The wallet did not sign every required signature.");
     }
-    if (
-      !verifyLaunchTicket(
-        payload.ticket,
-        transaction.message.serialize(),
-        payload.lastValidBlockHeight!,
-      )
-    ) {
+    if (transaction.message.addressTableLookups.length) {
+      throw new Error("Address lookup tables are not supported for VampPair launches.");
+    }
+
+    const requiredSigners = transaction.message.staticAccountKeys
+      .slice(0, transaction.message.header.numRequiredSignatures)
+      .map((key) => key.toBase58());
+    if (transaction.message.staticAccountKeys[0]?.toBase58() !== claims.payer) {
+      throw new Error("The transaction fee payer does not match the connected wallet.");
+    }
+    if (claims.kind === "create" && !requiredSigners.includes(claims.mint)) {
+      throw new Error("The new mint did not sign the creation transaction.");
+    }
+    if (semanticMessageDigest(transaction.message) !== claims.semanticDigest) {
       throw new Error("This transaction does not match the launch prepared by VampPair.");
     }
+    validateComputeBudget(transaction);
 
     const connection = getConnection();
     const signature = await connection.sendRawTransaction(raw, {

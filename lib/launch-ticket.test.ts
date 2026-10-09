@@ -1,6 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Keypair, TransactionMessage, VersionedTransaction } from "@solana/web3.js";
-import { createLaunchTicket, verifyLaunchTicket } from "./launch-ticket";
+import {
+  ComputeBudgetProgram,
+  Keypair,
+  SystemProgram,
+  TransactionMessage,
+} from "@solana/web3.js";
+import {
+  createLaunchTicket,
+  semanticMessageDigest,
+  verifyLaunchTicket,
+} from "./launch-ticket";
 
 describe("launch tickets", () => {
   const previous = process.env.LAUNCH_TICKET_SECRET;
@@ -14,33 +23,90 @@ describe("launch tickets", () => {
     else process.env.LAUNCH_TICKET_SECRET = previous;
   });
 
-  it("accepts only the exact prepared message and confirmation window", () => {
-    const message = Uint8Array.from([1, 2, 3, 4]);
-    const ticket = createLaunchTicket(message, 12345);
+  function message(priorityFee: number, lamports = 1) {
+    const payer = Keypair.generate();
+    const mint = Keypair.generate();
+    const blockhash = Keypair.generate().publicKey.toBase58();
+    return {
+      payer,
+      mint,
+      message: new TransactionMessage({
+        payerKey: payer.publicKey,
+        recentBlockhash: blockhash,
+        instructions: [
+          ComputeBudgetProgram.setComputeUnitLimit({ units: 320_000 }),
+          ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFee }),
+          SystemProgram.transfer({
+            fromPubkey: payer.publicKey,
+            toPubkey: mint.publicKey,
+            lamports,
+          }),
+        ],
+      }).compileToV0Message(),
+    };
+  }
 
-    expect(verifyLaunchTicket(ticket, message, 12345)).toBe(true);
-    expect(verifyLaunchTicket(ticket, Uint8Array.from([1, 2, 3, 5]), 12345)).toBe(false);
-    expect(verifyLaunchTicket(ticket, message, 12346)).toBe(false);
+  it("accepts a genuine signed claims payload", () => {
+    const built = message(100_000);
+    const ticket = createLaunchTicket(built.message, {
+      kind: "create",
+      payer: built.payer.publicKey.toBase58(),
+      mint: built.mint.publicKey.toBase58(),
+      lastValidBlockHeight: 12345,
+    });
+
+    expect(verifyLaunchTicket(ticket)).toMatchObject({
+      version: 2,
+      kind: "create",
+      payer: built.payer.publicKey.toBase58(),
+      mint: built.mint.publicKey.toBase58(),
+      blockhash: built.message.recentBlockhash,
+      lastValidBlockHeight: 12345,
+      semanticDigest: semanticMessageDigest(built.message),
+    });
   });
 
-  it("remains valid after wallet and mint signatures are added", () => {
-    const wallet = Keypair.generate();
-    const mint = Keypair.generate();
-    const message = new TransactionMessage({
-      payerKey: wallet.publicKey,
-      recentBlockhash: Keypair.generate().publicKey.toBase58(),
-      instructions: [],
+  it("allows Phantom to adjust only compute-budget instructions", () => {
+    const original = message(100_000);
+    const adjusted = new TransactionMessage({
+      payerKey: original.payer.publicKey,
+      recentBlockhash: original.message.recentBlockhash,
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
+        ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 250_000 }),
+        SystemProgram.transfer({
+          fromPubkey: original.payer.publicKey,
+          toPubkey: original.mint.publicKey,
+          lamports: 1,
+        }),
+      ],
     }).compileToV0Message();
-    message.header.numRequiredSignatures = 2;
-    message.staticAccountKeys.splice(1, 0, mint.publicKey);
-    message.header.numReadonlySignedAccounts = 1;
-    const transaction = new VersionedTransaction(message);
-    const ticket = createLaunchTicket(message.serialize(), 12345);
 
-    transaction.sign([wallet]);
-    transaction.sign([mint]);
+    expect(semanticMessageDigest(adjusted)).toBe(semanticMessageDigest(original.message));
+  });
 
-    expect(transaction.signatures.every((signature) => signature.some(Boolean))).toBe(true);
-    expect(verifyLaunchTicket(ticket, transaction.message.serialize(), 12345)).toBe(true);
+  it("rejects any change to a non-fee instruction or the ticket", () => {
+    const original = message(100_000);
+    const changed = new TransactionMessage({
+      payerKey: original.payer.publicKey,
+      recentBlockhash: original.message.recentBlockhash,
+      instructions: [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: 320_000 }),
+        SystemProgram.transfer({
+          fromPubkey: original.payer.publicKey,
+          toPubkey: original.mint.publicKey,
+          lamports: 2,
+        }),
+      ],
+    }).compileToV0Message();
+    expect(semanticMessageDigest(changed)).not.toBe(semanticMessageDigest(original.message));
+
+    const ticket = createLaunchTicket(original.message, {
+      kind: "create",
+      payer: original.payer.publicKey.toBase58(),
+      mint: original.mint.publicKey.toBase58(),
+      lastValidBlockHeight: 12345,
+    });
+    expect(verifyLaunchTicket(`${ticket.slice(0, -1)}x`)).toBeNull();
   });
 });

@@ -98,7 +98,12 @@ export async function POST(request: Request) {
       quoteMint: quoteMint.toBase58(),
       blockhash: latest.blockhash,
       lastValidBlockHeight: latest.lastValidBlockHeight,
-      ticket: createLaunchTicket(message.serialize(), latest.lastValidBlockHeight),
+      ticket: createLaunchTicket(message, {
+        kind: "create",
+        payer: user.toBase58(),
+        mint: mint.toBase58(),
+        lastValidBlockHeight: latest.lastValidBlockHeight,
+      }),
       networkFeeLamports: fee.value || 0,
       walletBalanceLamports: balance,
       simulatedUnits: simulation.value.unitsConsumed || null,

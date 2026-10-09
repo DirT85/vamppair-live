@@ -102,7 +102,12 @@ export async function POST(request: Request) {
       transaction: Buffer.from(transaction.serialize()).toString("base64"),
       blockhash: latest.blockhash,
       lastValidBlockHeight: latest.lastValidBlockHeight,
-      ticket: createLaunchTicket(message.serialize(), latest.lastValidBlockHeight),
+      ticket: createLaunchTicket(message, {
+        kind: "buy",
+        payer: user.toBase58(),
+        mint: mint.toBase58(),
+        lastValidBlockHeight: latest.lastValidBlockHeight,
+      }),
       simulatedUnits: simulation.value.unitsConsumed || null,
     });
   } catch (error) {

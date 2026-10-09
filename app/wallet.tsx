@@ -20,22 +20,23 @@ import {
   type StandardEventsFeature,
 } from "@wallet-standard/features";
 import {
-  SolanaSignTransaction,
-  type SolanaSignTransactionFeature,
+  SolanaSignAndSendTransaction,
+  type SolanaSignAndSendTransactionFeature,
 } from "@solana/wallet-standard-features";
+import bs58 from "bs58";
 import { VersionedTransaction } from "@solana/web3.js";
 
 const MAINNET = "solana:mainnet";
 
 type SupportedWallet = Wallet &
   StandardConnectFeature &
-  SolanaSignTransactionFeature;
+  SolanaSignAndSendTransactionFeature;
 
 type WalletContextValue = {
   account: WalletAccount | null;
   connected: boolean;
   openPicker: () => void;
-  signTransaction: (transaction: VersionedTransaction) => Promise<VersionedTransaction>;
+  sendTransaction: (transaction: VersionedTransaction) => Promise<string>;
 };
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -44,7 +45,7 @@ function supportsMainnet(wallet: Wallet): wallet is SupportedWallet {
   return (
     wallet.chains.includes(MAINNET) &&
     StandardConnect in wallet.features &&
-    SolanaSignTransaction in wallet.features
+    SolanaSignAndSendTransaction in wallet.features
   );
 }
 
@@ -112,27 +113,32 @@ export function VampWalletProvider({ children }: { children: React.ReactNode }) 
     setOpen(false);
   }, [wallet]);
 
-  const signTransaction = useCallback(
+  const sendTransaction = useCallback(
     async (transaction: VersionedTransaction) => {
       if (!wallet || !account) throw new Error("Connect a wallet before launching.");
-      const feature = wallet.features[SolanaSignTransaction] as SolanaSignTransactionFeature[typeof SolanaSignTransaction];
+      const feature = wallet.features[SolanaSignAndSendTransaction] as SolanaSignAndSendTransactionFeature[typeof SolanaSignAndSendTransaction];
       if (!feature.supportedTransactionVersions.includes(0)) {
-        throw new Error("This wallet cannot sign the transaction version Pump requires.");
+        throw new Error("This wallet cannot send the transaction version Pump requires.");
       }
-      const [output] = await feature.signTransaction({
+      const [output] = await feature.signAndSendTransaction({
         account,
         transaction: transaction.serialize(),
         chain: MAINNET,
-        options: { preflightCommitment: "confirmed" },
+        options: {
+          preflightCommitment: "confirmed",
+          commitment: "confirmed",
+          skipPreflight: false,
+          maxRetries: 8,
+        },
       });
-      return VersionedTransaction.deserialize(output.signedTransaction);
+      return bs58.encode(output.signature);
     },
     [account, wallet],
   );
 
   const value = useMemo<WalletContextValue>(
-    () => ({ account, connected: Boolean(account), openPicker: () => setOpen(true), signTransaction }),
-    [account, signTransaction],
+    () => ({ account, connected: Boolean(account), openPicker: () => setOpen(true), sendTransaction }),
+    [account, sendTransaction],
   );
 
   return (

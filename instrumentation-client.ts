@@ -25,7 +25,7 @@ initBotId({
       advancedOptions: basicProtection,
     },
     {
-      path: "/api/launch/send",
+      path: "/api/launch/confirm",
       method: "POST",
       advancedOptions: basicProtection,
     },

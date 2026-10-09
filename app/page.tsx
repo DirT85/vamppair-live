@@ -24,6 +24,12 @@ type Stage = "pick" | "compose" | "uploading" | "preflight" | "signing" | "sendi
 type IdentityMode = "custom" | "copy";
 type LaunchStatus = "confirmed" | "expired" | "pending";
 type View = "launcher" | "portfolio";
+type LaunchSendResult = {
+  signature: string;
+  explorerUrl: string;
+  status: LaunchStatus;
+  message?: string;
+};
 
 function mintFromInput(value: string) {
   const trimmed = value.trim();
@@ -45,14 +51,6 @@ function symbolLabel(value: string) {
   return value.startsWith("$") ? value : `$${value}`;
 }
 
-function bytesToBase64(bytes: Uint8Array) {
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
-  }
-  return btoa(binary);
-}
-
 function base64ToBytes(value: string) {
   const binary = atob(value);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
@@ -64,8 +62,32 @@ async function json<T>(response: Response): Promise<T> {
   return data;
 }
 
+async function confirmSubmitted(
+  signature: string,
+  blockhash: string,
+  lastValidBlockHeight: number,
+): Promise<LaunchSendResult> {
+  const explorerUrl = `https://solscan.io/tx/${signature}`;
+  try {
+    return await json<LaunchSendResult>(
+      await fetch("/api/launch/confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signature, blockhash, lastValidBlockHeight }),
+      }),
+    );
+  } catch {
+    return {
+      signature,
+      explorerUrl,
+      status: "pending",
+      message: "Your wallet submitted the transaction. Confirmation is still pending; check the transaction before trying again.",
+    };
+  }
+}
+
 export default function Home() {
-  const { account, signTransaction, connected, openPicker } = useVampWallet();
+  const { account, sendTransaction, connected, openPicker } = useVampWallet();
   const publicKey = useMemo(() => account ? new PublicKey(account.address) : null, [account]);
   const [view, setView] = useState<View>("launcher");
   const [launchRevision, setLaunchRevision] = useState(0);
@@ -139,7 +161,7 @@ export default function Home() {
   }
 
   async function launch() {
-    if (!coin || !publicKey || !signTransaction || !image || !confirmed || !identityReady) return;
+    if (!coin || !publicKey || !sendTransaction || !image || !confirmed || !identityReady) return;
     setError("");
     setResult(null);
 
@@ -161,7 +183,6 @@ export default function Home() {
         mint: string;
         blockhash: string;
         lastValidBlockHeight: number;
-        ticket: string;
         networkFeeLamports: number;
         simulatedUnits: number | null;
       }>(
@@ -181,27 +202,11 @@ export default function Home() {
 
       setStage("signing");
       const transaction = VersionedTransaction.deserialize(base64ToBytes(built.transaction));
-      const signed = await signTransaction(transaction);
-      signed.sign([mintKeypair]);
+      transaction.sign([mintKeypair]);
+      const signature = await sendTransaction(transaction);
 
       setStage("sending");
-      const sent = await json<{
-        signature: string;
-        explorerUrl: string;
-        status: LaunchStatus;
-        message?: string;
-      }>(
-        await fetch("/api/launch/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            transaction: bytesToBase64(signed.serialize()),
-            blockhash: built.blockhash,
-            lastValidBlockHeight: built.lastValidBlockHeight,
-            ticket: built.ticket,
-          }),
-        }),
-      );
+      const sent = await confirmSubmitted(signature, built.blockhash, built.lastValidBlockHeight);
 
       let buyExplorerUrl: string | undefined;
       let launchMessage = sent.message;
@@ -212,7 +217,6 @@ export default function Home() {
             transaction: string;
             blockhash: string;
             lastValidBlockHeight: number;
-            ticket: string;
           }>(
             await fetch("/api/launch/buy/build", {
               method: "POST",
@@ -228,25 +232,13 @@ export default function Home() {
 
           setStage("buy-signing");
           const buyTransaction = VersionedTransaction.deserialize(base64ToBytes(buyBuilt.transaction));
-          const signedBuy = await signTransaction(buyTransaction);
+          const buySignature = await sendTransaction(buyTransaction);
 
           setStage("buy-sending");
-          const bought = await json<{
-            signature: string;
-            explorerUrl: string;
-            status: LaunchStatus;
-            message?: string;
-          }>(
-            await fetch("/api/launch/send", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                transaction: bytesToBase64(signedBuy.serialize()),
-                blockhash: buyBuilt.blockhash,
-                lastValidBlockHeight: buyBuilt.lastValidBlockHeight,
-                ticket: buyBuilt.ticket,
-              }),
-            }),
+          const bought = await confirmSubmitted(
+            buySignature,
+            buyBuilt.blockhash,
+            buyBuilt.lastValidBlockHeight,
           );
           buyExplorerUrl = bought.explorerUrl;
           launchMessage = bought.status === "confirmed"

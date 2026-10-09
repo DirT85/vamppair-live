@@ -11,7 +11,6 @@ import {
   PUMP_SDK,
 } from "@pump-fun/pump-sdk";
 import { z } from "zod";
-import { createLaunchTicket } from "@/lib/launch-ticket";
 import { protectRequest } from "@/lib/request-protection";
 import { getConnection, parsePublicKey, publicError } from "@/lib/solana";
 import { parseTokenAmount } from "@/lib/token-amount";
@@ -102,12 +101,6 @@ export async function POST(request: Request) {
       transaction: Buffer.from(transaction.serialize()).toString("base64"),
       blockhash: latest.blockhash,
       lastValidBlockHeight: latest.lastValidBlockHeight,
-      ticket: createLaunchTicket(message, {
-        kind: "buy",
-        payer: user.toBase58(),
-        mint: mint.toBase58(),
-        lastValidBlockHeight: latest.lastValidBlockHeight,
-      }),
       simulatedUnits: simulation.value.unitsConsumed || null,
     });
   } catch (error) {

@@ -384,6 +384,16 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      {view === "launcher" && coin && error && (
+        <div className="failureToast" role="alert" aria-live="assertive">
+          <div>
+            <strong>Launch stopped</strong>
+            <p>{error}</p>
+          </div>
+          <button type="button" aria-label="Dismiss launch error" onClick={() => setError("")}>×</button>
+        </div>
+      )}
     </>
   );
 }

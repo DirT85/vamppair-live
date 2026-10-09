@@ -117,6 +117,8 @@ export async function POST(request: Request) {
       status: "confirmed",
     });
   } catch (error) {
-    return NextResponse.json({ error: publicError(error) }, { status: 422 });
+    const message = publicError(error);
+    console.error(`[launch/send] ${message}`);
+    return NextResponse.json({ error: message }, { status: 422 });
   }
 }

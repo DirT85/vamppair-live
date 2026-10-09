@@ -51,6 +51,14 @@ function symbolLabel(value: string) {
   return value.startsWith("$") ? value : `$${value}`;
 }
 
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
 function base64ToBytes(value: string) {
   const binary = atob(value);
   return Uint8Array.from(binary, (char) => char.charCodeAt(0));
@@ -87,7 +95,7 @@ async function confirmSubmitted(
 }
 
 export default function Home() {
-  const { account, sendTransaction, connected, openPicker } = useVampWallet();
+  const { account, signTransaction, sendTransaction, connected, openPicker } = useVampWallet();
   const publicKey = useMemo(() => account ? new PublicKey(account.address) : null, [account]);
   const [view, setView] = useState<View>("launcher");
   const [launchRevision, setLaunchRevision] = useState(0);
@@ -161,7 +169,7 @@ export default function Home() {
   }
 
   async function launch() {
-    if (!coin || !publicKey || !sendTransaction || !image || !confirmed || !identityReady) return;
+    if (!coin || !publicKey || !signTransaction || !sendTransaction || !image || !confirmed || !identityReady) return;
     setError("");
     setResult(null);
 
@@ -183,6 +191,7 @@ export default function Home() {
         mint: string;
         blockhash: string;
         lastValidBlockHeight: number;
+        ticket: string;
         networkFeeLamports: number;
         simulatedUnits: number | null;
       }>(
@@ -202,11 +211,22 @@ export default function Home() {
 
       setStage("signing");
       const transaction = VersionedTransaction.deserialize(base64ToBytes(built.transaction));
-      transaction.sign([mintKeypair]);
-      const signature = await sendTransaction(transaction);
+      const walletSigned = await signTransaction(transaction);
+      walletSigned.sign([mintKeypair]);
 
       setStage("sending");
-      const sent = await confirmSubmitted(signature, built.blockhash, built.lastValidBlockHeight);
+      const sent = await json<LaunchSendResult>(
+        await fetch("/api/launch/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            transaction: bytesToBase64(walletSigned.serialize()),
+            blockhash: built.blockhash,
+            lastValidBlockHeight: built.lastValidBlockHeight,
+            ticket: built.ticket,
+          }),
+        }),
+      );
 
       let buyExplorerUrl: string | undefined;
       let launchMessage = sent.message;

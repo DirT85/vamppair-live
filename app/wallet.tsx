@@ -20,7 +20,9 @@ import {
   type StandardEventsFeature,
 } from "@wallet-standard/features";
 import {
+  SolanaSignTransaction,
   SolanaSignAndSendTransaction,
+  type SolanaSignTransactionFeature,
   type SolanaSignAndSendTransactionFeature,
 } from "@solana/wallet-standard-features";
 import bs58 from "bs58";
@@ -30,12 +32,14 @@ const MAINNET = "solana:mainnet";
 
 type SupportedWallet = Wallet &
   StandardConnectFeature &
+  SolanaSignTransactionFeature &
   SolanaSignAndSendTransactionFeature;
 
 type WalletContextValue = {
   account: WalletAccount | null;
   connected: boolean;
   openPicker: () => void;
+  signTransaction: (transaction: VersionedTransaction) => Promise<VersionedTransaction>;
   sendTransaction: (transaction: VersionedTransaction) => Promise<string>;
 };
 
@@ -45,6 +49,7 @@ function supportsMainnet(wallet: Wallet): wallet is SupportedWallet {
   return (
     wallet.chains.includes(MAINNET) &&
     StandardConnect in wallet.features &&
+    SolanaSignTransaction in wallet.features &&
     SolanaSignAndSendTransaction in wallet.features
   );
 }
@@ -136,9 +141,27 @@ export function VampWalletProvider({ children }: { children: React.ReactNode }) 
     [account, wallet],
   );
 
+  const signTransaction = useCallback(
+    async (transaction: VersionedTransaction) => {
+      if (!wallet || !account) throw new Error("Connect a wallet before launching.");
+      const feature = wallet.features[SolanaSignTransaction] as SolanaSignTransactionFeature[typeof SolanaSignTransaction];
+      if (!feature.supportedTransactionVersions.includes(0)) {
+        throw new Error("This wallet cannot sign the transaction version Pump requires.");
+      }
+      const [output] = await feature.signTransaction({
+        account,
+        transaction: transaction.serialize(),
+        chain: MAINNET,
+        options: { preflightCommitment: "confirmed" },
+      });
+      return VersionedTransaction.deserialize(output.signedTransaction);
+    },
+    [account, wallet],
+  );
+
   const value = useMemo<WalletContextValue>(
-    () => ({ account, connected: Boolean(account), openPicker: () => setOpen(true), sendTransaction }),
-    [account, sendTransaction],
+    () => ({ account, connected: Boolean(account), openPicker: () => setOpen(true), signTransaction, sendTransaction }),
+    [account, signTransaction, sendTransaction],
   );
 
   return (

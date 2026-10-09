@@ -11,9 +11,20 @@ function hasSignature(bytes: Uint8Array) {
 
 export async function POST(request: Request) {
   try {
-    const payload = (await request.json()) as { transaction?: string };
+    const payload = (await request.json()) as {
+      transaction?: string;
+      blockhash?: string;
+      lastValidBlockHeight?: number;
+    };
     if (!payload.transaction || payload.transaction.length > 20_000) {
       throw new Error("A signed launch transaction is required.");
+    }
+    if (
+      !payload.blockhash ||
+      !Number.isSafeInteger(payload.lastValidBlockHeight) ||
+      (payload.lastValidBlockHeight || 0) <= 0
+    ) {
+      throw new Error("The launch transaction is missing its confirmation window.");
     }
 
     const raw = Buffer.from(payload.transaction, "base64");
@@ -42,16 +53,60 @@ export async function POST(request: Request) {
     const signature = await connection.sendRawTransaction(raw, {
       skipPreflight: false,
       preflightCommitment: "confirmed",
-      maxRetries: 3,
+      maxRetries: 8,
     });
-    const confirmation = await connection.confirmTransaction(signature, "confirmed");
-    if (confirmation.value.err) {
-      throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+    const explorerUrl = `https://solscan.io/tx/${signature}`;
+
+    try {
+      const confirmation = await connection.confirmTransaction(
+        {
+          signature,
+          blockhash: payload.blockhash,
+          lastValidBlockHeight: payload.lastValidBlockHeight!,
+        },
+        "confirmed",
+      );
+      if (confirmation.value.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+      }
+    } catch (confirmationError) {
+      const signatureStatus = await connection
+        .getSignatureStatus(signature, { searchTransactionHistory: true })
+        .catch(() => null);
+      if (signatureStatus?.value?.err) {
+        throw new Error(`Transaction failed: ${JSON.stringify(signatureStatus.value.err)}`);
+      }
+      if (
+        signatureStatus?.value?.confirmationStatus === "confirmed" ||
+        signatureStatus?.value?.confirmationStatus === "finalized"
+      ) {
+        return NextResponse.json({ signature, explorerUrl, status: "confirmed" });
+      }
+
+      const currentBlockHeight = await connection.getBlockHeight("confirmed").catch(() => null);
+      if (currentBlockHeight !== null && currentBlockHeight > payload.lastValidBlockHeight!) {
+        return NextResponse.json({
+          signature,
+          explorerUrl,
+          status: "expired",
+          message: "The transaction expired before confirmation. No launch was found, so it is safe to build a fresh transaction.",
+        });
+      }
+
+      return NextResponse.json({
+        signature,
+        explorerUrl,
+        status: "pending",
+        message: confirmationError instanceof Error
+          ? "The transaction was submitted but is still pending. Check it before trying again."
+          : "The transaction was submitted but its status is still pending.",
+      });
     }
 
     return NextResponse.json({
       signature,
-      explorerUrl: `https://solscan.io/tx/${signature}`,
+      explorerUrl,
+      status: "confirmed",
     });
   } catch (error) {
     return NextResponse.json({ error: publicError(error) }, { status: 422 });

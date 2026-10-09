@@ -58,7 +58,7 @@ h1 em { color: var(--blood-hot); font-weight: 400; }
 .search button, .launch { min-height: 52px; padding: 0 22px; border: 0; border-radius: 11px; color: white; background: var(--blood); font-weight: 950; cursor: pointer; box-shadow: inset 0 -3px 0 rgba(75,0,22,.65); }
 .search button:hover, .launch:hover { background: var(--blood-hot); }
 .search button:disabled, .launch:disabled { cursor: not-allowed; opacity: .48; }
-.error { margin: 16px auto 0; padding: 12px 15px; max-width: 780px; border: 1px solid #873d45; border-radius: 11px; color: #ffd6d6; background: rgba(106,22,35,.27); font-size: .88rem; line-height: 1.45; }
+.error { margin: 16px auto 0; padding: 12px 15px; max-width: 780px; overflow-wrap: anywhere; border: 1px solid #873d45; border-radius: 11px; color: #ffd6d6; background: rgba(106,22,35,.27); font-size: .88rem; line-height: 1.45; }
 .rules { max-width: 760px; margin: 42px auto 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; overflow: hidden; border: 1px solid #372130; border-radius: 14px; background: #372130; }
 .rules span { padding: 16px; color: #9c8795; background: rgba(21,9,17,.96); font-size: .78rem; font-weight: 750; }
 .rules b { margin-right: 8px; color: var(--blood-hot); }
@@ -139,6 +139,7 @@ dd { margin: 0; color: #d9c8d1; font-weight: 750; text-align: right; }
 .successCard > p:not(.kicker) { color: var(--ash); line-height: 1.5; }
 .successCard code { display: block; margin: 18px 0; padding: 11px; overflow: hidden; border-radius: 9px; color: #bda8b5; background: #0b0408; font-size: .72rem; text-overflow: ellipsis; }
 .successActions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.successActions > :only-child { grid-column: 1 / -1; }
 .successActions a, .successCard > button { padding: 12px; border: 1px solid #6a2d48; border-radius: 10px; color: var(--bone); background: #2a0d20; font-size: .8rem; font-weight: 850; text-decoration: none; }
 .successCard > button { width: 100%; margin-top: 10px; cursor: pointer; }
 

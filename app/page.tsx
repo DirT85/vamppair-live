@@ -19,6 +19,7 @@ type Coin = {
 
 type Stage = "pick" | "compose" | "uploading" | "preflight" | "signing" | "sending" | "success";
 type IdentityMode = "custom" | "copy";
+type LaunchStatus = "confirmed" | "expired" | "pending";
 
 function mintFromInput(value: string) {
   const trimmed = value.trim();
@@ -72,7 +73,13 @@ export default function Home() {
   const [confirmed, setConfirmed] = useState(false);
   const [stage, setStage] = useState<Stage>("pick");
   const [error, setError] = useState("");
-  const [result, setResult] = useState<{ mint: string; signature: string; explorerUrl: string } | null>(null);
+  const [result, setResult] = useState<{
+    mint: string;
+    signature: string;
+    explorerUrl: string;
+    status: LaunchStatus;
+    message?: string;
+  } | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   useEffect(() => {
@@ -135,6 +142,8 @@ export default function Home() {
       const built = await json<{
         transaction: string;
         mint: string;
+        blockhash: string;
+        lastValidBlockHeight: number;
         networkFeeLamports: number;
         simulatedUnits: number | null;
       }>(
@@ -156,11 +165,20 @@ export default function Home() {
       const signed = await signTransaction(transaction);
 
       setStage("sending");
-      const sent = await json<{ signature: string; explorerUrl: string }>(
+      const sent = await json<{
+        signature: string;
+        explorerUrl: string;
+        status: LaunchStatus;
+        message?: string;
+      }>(
         await fetch("/api/launch/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ transaction: bytesToBase64(signed.serialize()) }),
+          body: JSON.stringify({
+            transaction: bytesToBase64(signed.serialize()),
+            blockhash: built.blockhash,
+            lastValidBlockHeight: built.lastValidBlockHeight,
+          }),
         }),
       );
 
@@ -306,15 +324,25 @@ export default function Home() {
           <div className="success" role="dialog" aria-modal="true" aria-labelledby="success-title">
             <div className="successCard">
               <span className="successMark">V</span>
-              <p className="kicker">The bite landed</p>
-              <h2 id="success-title">Vamp launched.</h2>
-              <p>The new mint is live on Solana and paired against {coin?.name}.</p>
+              <p className="kicker">
+                {result.status === "confirmed" ? "The bite landed" : result.status === "expired" ? "The bite missed" : "The bite is pending"}
+              </p>
+              <h2 id="success-title">
+                {result.status === "confirmed" ? "Vamp launched." : result.status === "expired" ? "Launch expired." : "Checking Solana."}
+              </h2>
+              <p>
+                {result.status === "confirmed"
+                  ? `The new mint is live on Solana and paired against ${coin?.name}.`
+                  : result.message}
+              </p>
               <code>{result.mint}</code>
               <div className="successActions">
                 <a href={result.explorerUrl} target="_blank" rel="noreferrer">View transaction</a>
-                <a href={`https://pump.fun/coin/${result.mint}`} target="_blank" rel="noreferrer">Open on Pump</a>
+                {result.status === "confirmed" && <a href={`https://pump.fun/coin/${result.mint}`} target="_blank" rel="noreferrer">Open on Pump</a>}
               </div>
-              <button type="button" onClick={() => setStage("compose")}>Close</button>
+              <button type="button" onClick={() => setStage("compose")}>
+                {result.status === "expired" ? "Build a fresh transaction" : result.status === "pending" ? "I’ll verify before retrying" : "Close"}
+              </button>
             </div>
           </div>
         )}

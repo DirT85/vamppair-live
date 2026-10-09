@@ -1,38 +1,6 @@
 import { initBotId } from "botid/client/core";
-
-const basicProtection = { checkLevel: "basic" as const };
+import { PROTECTED_API_ROUTES } from "@/lib/botid-routes";
 
 initBotId({
-  protect: [
-    {
-      path: "/api/coin/*",
-      method: "GET",
-      advancedOptions: basicProtection,
-    },
-    {
-      path: "/api/metadata",
-      method: "POST",
-      advancedOptions: basicProtection,
-    },
-    {
-      path: "/api/launch/build",
-      method: "POST",
-      advancedOptions: basicProtection,
-    },
-    {
-      path: "/api/launch/buy/build",
-      method: "POST",
-      advancedOptions: basicProtection,
-    },
-    {
-      path: "/api/launch/confirm",
-      method: "POST",
-      advancedOptions: basicProtection,
-    },
-    {
-      path: "/api/portfolio",
-      method: "POST",
-      advancedOptions: basicProtection,
-    },
-  ],
+  protect: [...PROTECTED_API_ROUTES],
 });

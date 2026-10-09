@@ -116,6 +116,12 @@ dd { margin: 0; color: #d9c8d1; font-weight: 750; text-align: right; }
 .launchFacts span, .launchFacts strong { display: block; }
 .launchFacts span { color: #816b79; font-size: .64rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; }
 .launchFacts strong { margin-top: 5px; color: #d9c9d2; font-size: .75rem; }
+.initialBuyField { margin-bottom: 18px; }
+.initialBuyField > small { display: block; margin-top: 7px; color: #8f7686; font-size: .72rem; line-height: 1.45; }
+.amountInput { display: flex; align-items: center; overflow: hidden; border: 1px solid #4a293b; border-radius: 10px; background: #0e060b; }
+.amountInput:focus-within { border-color: #e91e55; box-shadow: 0 0 0 2px rgb(233 30 85 / 12%); }
+.amountInput input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; }
+.amountInput b { padding: 0 14px; color: #e8cbd7; font-size: .75rem; white-space: nowrap; }
 .confirm { margin: 19px 0; display: grid; grid-template-columns: auto 1fr; gap: 11px; align-items: start; color: #bca8b4; font-size: .79rem; line-height: 1.45; cursor: pointer; }
 .confirm input { width: 18px; height: 18px; margin: 1px 0 0; accent-color: var(--blood); }
 .launch { width: 100%; min-height: 56px; font-size: .92rem; }

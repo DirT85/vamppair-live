@@ -70,6 +70,7 @@ export async function GET(
         resolved.source === "pumpCoin" && resolved.pumpQuote
           ? resolved.pumpQuote.depth
           : 0,
+      quoteDecimals: resolved.decimals,
       quoteTokenProgram: resolved.quoteTokenProgram.toBase58(),
     });
   } catch (error) {

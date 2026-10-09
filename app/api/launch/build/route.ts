@@ -6,6 +6,7 @@ import {
 } from "@solana/web3.js";
 import { OnlinePumpSdk, PUMP_SDK } from "@pump-fun/pump-sdk";
 import { z } from "zod";
+import { createLaunchTicket } from "@/lib/launch-ticket";
 import { getConnection, parsePublicKey, publicError } from "@/lib/solana";
 import { protectRequest } from "@/lib/request-protection";
 
@@ -97,9 +98,11 @@ export async function POST(request: Request) {
       quoteMint: quoteMint.toBase58(),
       blockhash: latest.blockhash,
       lastValidBlockHeight: latest.lastValidBlockHeight,
+      ticket: createLaunchTicket(message.serialize(), latest.lastValidBlockHeight),
       networkFeeLamports: fee.value || 0,
       walletBalanceLamports: balance,
       simulatedUnits: simulation.value.unitsConsumed || null,
+      quoteDecimals: resolved.decimals,
       network: "mainnet-beta",
     });
   } catch (error) {

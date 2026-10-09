@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { ComputeBudgetProgram, VersionedTransaction } from "@solana/web3.js";
-import { getConnection, PUMP_PROGRAM_ID, publicError } from "@/lib/solana";
+import { VersionedTransaction } from "@solana/web3.js";
+import { verifyLaunchTicket } from "@/lib/launch-ticket";
+import { getConnection, publicError } from "@/lib/solana";
 import { protectRequest } from "@/lib/request-protection";
 
 export const runtime = "nodejs";
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
       transaction?: string;
       blockhash?: string;
       lastValidBlockHeight?: number;
+      ticket?: string;
     };
     if (!payload.transaction || payload.transaction.length > 20_000) {
       throw new Error("A signed launch transaction is required.");
@@ -34,27 +36,26 @@ export async function POST(request: Request) {
     ) {
       throw new Error("The launch transaction is missing its confirmation window.");
     }
+    if (!payload.ticket || payload.ticket.length > 100) {
+      throw new Error("The launch transaction is missing its secure launch ticket.");
+    }
 
     const raw = Buffer.from(payload.transaction, "base64");
     const transaction = VersionedTransaction.deserialize(raw);
+    if (transaction.message.recentBlockhash !== payload.blockhash) {
+      throw new Error("The launch confirmation window does not match the transaction.");
+    }
     if (!transaction.signatures.every(hasSignature)) {
       throw new Error("The wallet did not sign every required signature.");
     }
-
-    const keys = transaction.message.staticAccountKeys;
-    const allowedPrograms = new Set([
-      ComputeBudgetProgram.programId.toBase58(),
-      PUMP_PROGRAM_ID.toBase58(),
-    ]);
-    const instructionPrograms = transaction.message.compiledInstructions.map(
-      (instruction) => keys[instruction.programIdIndex]?.toBase58(),
-    );
     if (
-      instructionPrograms.length !== 3 ||
-      !instructionPrograms.includes(PUMP_PROGRAM_ID.toBase58()) ||
-      instructionPrograms.some((program) => !program || !allowedPrograms.has(program))
+      !verifyLaunchTicket(
+        payload.ticket,
+        transaction.message.serialize(),
+        payload.lastValidBlockHeight!,
+      )
     ) {
-      throw new Error("Only VampPair Pump creation transactions can be submitted here.");
+      throw new Error("This transaction does not match the launch prepared by VampPair.");
     }
 
     const connection = getConnection();

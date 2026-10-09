@@ -17,9 +17,10 @@ type Coin = {
   migrated: boolean;
   eligible: true;
   newDepth: number;
+  quoteDecimals: number;
 };
 
-type Stage = "pick" | "compose" | "uploading" | "preflight" | "signing" | "sending" | "success";
+type Stage = "pick" | "compose" | "uploading" | "preflight" | "signing" | "sending" | "buy-preflight" | "buy-signing" | "buy-sending" | "success";
 type IdentityMode = "custom" | "copy";
 type LaunchStatus = "confirmed" | "expired" | "pending";
 type View = "launcher" | "portfolio";
@@ -75,6 +76,7 @@ export default function Home() {
   const [newSymbol, setNewSymbol] = useState("");
   const [image, setImage] = useState<File | null>(null);
   const [description, setDescription] = useState("");
+  const [initialBuy, setInitialBuy] = useState("0");
   const [confirmed, setConfirmed] = useState(false);
   const [stage, setStage] = useState<Stage>("pick");
   const [error, setError] = useState("");
@@ -84,6 +86,7 @@ export default function Home() {
     explorerUrl: string;
     status: LaunchStatus;
     message?: string;
+    buyExplorerUrl?: string;
   } | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
@@ -104,6 +107,13 @@ export default function Home() {
   const launchName = identityMode === "copy" ? coin?.name || "" : newName.trim();
   const launchSymbol = identityMode === "copy" ? coin?.symbol || "" : newSymbol.trim().toUpperCase();
   const identityReady = Boolean(launchName && launchSymbol);
+  const initialBuyValue = initialBuy.trim() || "0";
+  const initialBuyReady = Boolean(
+    coin &&
+    /^\d{1,10}(?:\.\d{0,9})?$/.test(initialBuyValue) &&
+    (initialBuyValue.split(".")[1]?.length || 0) <= coin.quoteDecimals
+  );
+  const hasInitialBuy = initialBuyReady && Number(initialBuyValue) > 0;
 
   async function inspect(event: FormEvent) {
     event.preventDefault();
@@ -118,6 +128,7 @@ export default function Home() {
       setNewName("");
       setNewSymbol("");
       setImage(null);
+      setInitialBuy("0");
       setConfirmed(false);
       setDescription(`A vamp paired directly against ${loaded.name}. Original mint: ${loaded.mint}`);
       setStage("compose");
@@ -150,6 +161,7 @@ export default function Home() {
         mint: string;
         blockhash: string;
         lastValidBlockHeight: number;
+        ticket: string;
         networkFeeLamports: number;
         simulatedUnits: number | null;
       }>(
@@ -186,9 +198,66 @@ export default function Home() {
             transaction: bytesToBase64(signed.serialize()),
             blockhash: built.blockhash,
             lastValidBlockHeight: built.lastValidBlockHeight,
+            ticket: built.ticket,
           }),
         }),
       );
+
+      let buyExplorerUrl: string | undefined;
+      let launchMessage = sent.message;
+      if (hasInitialBuy && sent.status === "confirmed") {
+        try {
+          setStage("buy-preflight");
+          const buyBuilt = await json<{
+            transaction: string;
+            blockhash: string;
+            lastValidBlockHeight: number;
+            ticket: string;
+          }>(
+            await fetch("/api/launch/buy/build", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                user: publicKey.toBase58(),
+                mint: built.mint,
+                quoteMint: coin.mint,
+                quoteAmount: initialBuyValue,
+              }),
+            }),
+          );
+
+          setStage("buy-signing");
+          const buyTransaction = VersionedTransaction.deserialize(base64ToBytes(buyBuilt.transaction));
+          const signedBuy = await signTransaction(buyTransaction);
+
+          setStage("buy-sending");
+          const bought = await json<{
+            signature: string;
+            explorerUrl: string;
+            status: LaunchStatus;
+            message?: string;
+          }>(
+            await fetch("/api/launch/send", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                transaction: bytesToBase64(signedBuy.serialize()),
+                blockhash: buyBuilt.blockhash,
+                lastValidBlockHeight: buyBuilt.lastValidBlockHeight,
+                ticket: buyBuilt.ticket,
+              }),
+            }),
+          );
+          buyExplorerUrl = bought.explorerUrl;
+          launchMessage = bought.status === "confirmed"
+            ? `Initial buy of ${initialBuyValue} ${symbolLabel(coin.symbol)} confirmed.`
+            : `Coin launched. The initial buy was submitted and is ${bought.status}. ${bought.message || "Check the buy transaction before retrying."}`;
+        } catch (buyProblem) {
+          launchMessage = `Coin launched, but the initial buy did not complete: ${buyProblem instanceof Error ? buyProblem.message : "Unknown error."}`;
+        }
+      } else if (hasInitialBuy && sent.status !== "confirmed") {
+        launchMessage = `${sent.message || "Creation is still pending."} The initial buy was not submitted yet.`;
+      }
 
       if (sent.status !== "expired") {
         rememberLaunch({
@@ -205,7 +274,7 @@ export default function Home() {
         setLaunchRevision((value) => value + 1);
       }
 
-      setResult({ mint: built.mint, ...sent });
+      setResult({ mint: built.mint, ...sent, message: launchMessage, buyExplorerUrl });
       setStage("success");
     } catch (problem) {
       setStage("compose");
@@ -213,9 +282,11 @@ export default function Home() {
     }
   }
 
-  const busy = ["uploading", "preflight", "signing", "sending"].includes(stage);
+  const busy = ["uploading", "preflight", "signing", "sending", "buy-preflight", "buy-signing", "buy-sending"].includes(stage);
   const actionLabel = !identityReady
     ? "Enter vamp name & ticker"
+    : !initialBuyReady
+      ? `Use up to ${coin?.quoteDecimals || 0} decimals for initial buy`
     : !connected
       ? "Connect wallet above"
     : !image
@@ -230,6 +301,12 @@ export default function Home() {
               ? "Approve in wallet…"
               : stage === "sending"
                 ? "Confirming on Solana…"
+                : stage === "buy-preflight"
+                  ? "Preparing initial buy…"
+                  : stage === "buy-signing"
+                    ? "Approve initial buy…"
+                    : stage === "buy-sending"
+                      ? "Confirming initial buy…"
                 : "Launch vamp on mainnet";
 
   return (
@@ -336,20 +413,35 @@ export default function Home() {
             </div>
 
             <section className="launchBox">
+              <label className="field initialBuyField">
+                <span>Initial buy <small>Optional · paid in {symbolLabel(coin.symbol)}</small></span>
+                <div className="amountInput">
+                  <input
+                    value={initialBuy}
+                    inputMode="decimal"
+                    autoComplete="off"
+                    maxLength={20}
+                    aria-describedby="initial-buy-help"
+                    onChange={(event) => setInitialBuy(event.target.value.replace(/[^0-9.]/g, ""))}
+                  />
+                  <b>{symbolLabel(coin.symbol)}</b>
+                </div>
+                <small id="initial-buy-help">Enter 0 for no buy. A buy spends the original paired coin, with up to 5% slippage—not SOL.</small>
+              </label>
               <div className="launchFacts">
                 <div><span>Network</span><strong>Mainnet-beta</strong></div>
-                <div><span>Initial buy</span><strong>None</strong></div>
+                <div><span>Initial buy</span><strong>{hasInitialBuy ? `${initialBuyValue} ${symbolLabel(coin.symbol)}` : "None"}</strong></div>
                 <div><span>New coin</span><strong>{launchName || "Not named yet"}</strong></div>
                 <div><span>Quote asset</span><strong>{symbolLabel(coin.symbol)}</strong></div>
                 <div><span>Authority</span><strong>Your wallet only</strong></div>
               </div>
               <label className="confirm">
                 <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-                <span>I understand this creates a real, irreversible Pump coin and spends SOL from my connected wallet after I approve the transaction.</span>
+                <span>I understand this creates a real, irreversible Pump coin and spends SOL{hasInitialBuy ? ` plus up to ${initialBuyValue} ${symbolLabel(coin.symbol)} (and slippage)` : ""} from my connected wallet after I approve the transaction.</span>
               </label>
               {error && <p className="error" role="alert">{error}</p>}
-              <button className="launch" type="button" disabled={!identityReady || !connected || !image || !confirmed || busy} onClick={launch}>{actionLabel}</button>
-              <p className="fineprint">VampPair never receives your private key. Your wallet displays and signs the final transaction. No automatic initial purchase is included.</p>
+              <button className="launch" type="button" disabled={!identityReady || !initialBuyReady || !connected || !image || !confirmed || busy} onClick={launch}>{actionLabel}</button>
+              <p className="fineprint">VampPair never receives your private key. Your wallet approves the creation first, then a second transaction if you choose an initial buy.</p>
             </section>
           </section>
         )}
@@ -366,12 +458,13 @@ export default function Home() {
               </h2>
               <p>
                 {result.status === "confirmed"
-                  ? `The new mint is live on Solana and paired against ${coin?.name}.`
+                  ? `The new mint is live on Solana and paired against ${coin?.name}.${result.message ? ` ${result.message}` : ""}`
                   : result.message}
               </p>
               <code>{result.mint}</code>
               <div className="successActions">
                 <a href={result.explorerUrl} target="_blank" rel="noreferrer">View transaction</a>
+                {result.buyExplorerUrl && <a href={result.buyExplorerUrl} target="_blank" rel="noreferrer">View initial buy</a>}
                 {result.status === "confirmed" && <a href={`https://pump.fun/coin/${result.mint}`} target="_blank" rel="noreferrer">Open on Pump</a>}
               </div>
               <button type="button" onClick={() => {

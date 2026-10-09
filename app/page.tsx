@@ -217,8 +217,8 @@ export default function Home() {
             {error && <p className="error" role="alert">{error}</p>}
             <div className="rules">
               <span><b>01</b> On-chain eligibility</span>
-              <span><b>02</b> User wallet signature</span>
-              <span><b>03</b> No bundled wallets</span>
+              <span><b>02</b> Choose vamp identity</span>
+              <span><b>03</b> Sign with your wallet</span>
             </div>
           </section>
         ) : (
